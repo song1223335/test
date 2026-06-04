@@ -124,22 +124,32 @@ def update_customer_purchase(customer_id: str, total_purchase: int):
     response = requests.patch(url, json=data, headers=headers)
     return response.status_code == 204
 
-# 데이터 로드
-df_broadcast = load_broadcast_data()
-df_customer = load_customer_data()
-
 # 제목
 st.title("📺 방송 성과 & 👥 고객 분석 통합 대시보드")
 st.markdown("---")
 
-# 데이터 처리 - 방송 데이터
-df_broadcast['방송날짜'] = pd.to_datetime(df_broadcast['방송날짜'])
-df_broadcast['시청률달성률'] = (df_broadcast['실제시청률'] / df_broadcast['예상시청률'] * 100).round(1)
-df_broadcast['판매달성률'] = (df_broadcast['실제판매액'] / df_broadcast['판매목표'] * 100).round(1)
+# 데이터 로드
+try:
+    df_broadcast = load_broadcast_data()
+    df_customer = load_customer_data()
 
-# 데이터 처리 - 고객 데이터
-df_customer['가입일자'] = pd.to_datetime(df_customer['가입일자'])
-df_customer['연령대'] = df_customer['연령대'].replace('35세', '30대')
+    # 데이터가 비어있으면 경고
+    if df_broadcast.empty or df_customer.empty:
+        st.warning("⚠️ 데이터를 불러올 수 없습니다. Supabase 연결을 확인하세요.")
+        st.stop()
+
+    # 데이터 처리 - 방송 데이터
+    df_broadcast['방송날짜'] = pd.to_datetime(df_broadcast['방송날짜'])
+    df_broadcast['시청률달성률'] = (df_broadcast['실제시청률'] / df_broadcast['예상시청률'] * 100).round(1)
+    df_broadcast['판매달성률'] = (df_broadcast['실제판매액'] / df_broadcast['판매목표'] * 100).round(1)
+
+    # 데이터 처리 - 고객 데이터
+    df_customer['가입일자'] = pd.to_datetime(df_customer['가입일자'])
+    df_customer['연령대'] = df_customer['연령대'].replace('35세', '30대')
+
+except Exception as e:
+    st.error(f"❌ 오류가 발생했습니다: {str(e)}")
+    st.stop()
 
 # 판매 데이터 (0 제외)
 df_broadcast_sales = df_broadcast[df_broadcast['실제판매액'] > 0]
