@@ -2,17 +2,135 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
+import requests
+import json
 
 # 페이지 설정
 st.set_page_config(page_title="방송/고객 통합 대시보드", layout="wide", initial_sidebar_state="expanded")
 
+# Supabase REST API 클라이언트
+@st.cache_resource
+def init_supabase():
+    url = st.secrets.get("supabase_url")
+    key = st.secrets.get("supabase_key")
+
+    if not url or not key:
+        st.error("⚠️ Supabase 자격증명이 필요합니다. .streamlit/secrets.toml 파일을 확인하세요.")
+        st.stop()
+
+    return {"url": url, "key": key}
+
+supabase_config = init_supabase()
+
+# 데이터 로드 함수
+@st.cache_data(ttl=60)
+def load_broadcast_data():
+    url = f"{supabase_config['url']}/rest/v1/broadcast_schedule"
+    headers = {
+        "apikey": supabase_config['key'],
+        "Authorization": f"Bearer {supabase_config['key']}",
+        "Content-Type": "application/json"
+    }
+
+    response = requests.get(url, headers=headers)
+    if response.status_code != 200:
+        st.error(f"❌ 방송 데이터 로드 실패: {response.text}")
+        return pd.DataFrame()
+
+    df = pd.DataFrame(response.json())
+    df['방송날짜'] = pd.to_datetime(df['broadcast_date'])
+
+    # 컬럼명 매핑
+    column_mapping = {
+        'broadcast_id': '방송ID',
+        'product_id': '상품ID',
+        'broadcast_time': '방송시간',
+        'channel': '채널',
+        'host': '진행자',
+        'expected_rating': '예상시청률',
+        'actual_rating': '실제시청률',
+        'sales_target': '판매목표',
+        'actual_sales': '실제판매액'
+    }
+    df = df.rename(columns=column_mapping)
+    return df
+
+@st.cache_data(ttl=60)
+def load_customer_data():
+    url = f"{supabase_config['url']}/rest/v1/customer"
+    headers = {
+        "apikey": supabase_config['key'],
+        "Authorization": f"Bearer {supabase_config['key']}",
+        "Content-Type": "application/json"
+    }
+
+    response = requests.get(url, headers=headers)
+    if response.status_code != 200:
+        st.error(f"❌ 고객 데이터 로드 실패: {response.text}")
+        return pd.DataFrame()
+
+    df = pd.DataFrame(response.json())
+
+    if len(df) > 0:
+        # 스네이크케이스 컬럼명을 한글로 변환
+        column_mapping = {
+            'customer_id': '고객ID',
+            'customer_name': '고객명',
+            'gender': '성별',
+            'age_group': '연령대',
+            'region': '지역',
+            'join_date': '가입일자',
+            'purchase_count': '구매횟수',
+            'total_purchase': '총구매액',
+            'customer_grade': '고객등급',
+            'active_status': '활성상태'
+        }
+        df = df.rename(columns=column_mapping)
+        df['가입일자'] = pd.to_datetime(df['가입일자'])
+
+    return df
+
+# Supabase 업데이트 함수
+def update_broadcast_rating(broadcast_id: str, actual_rating: float):
+    url = f"{supabase_config['url']}/rest/v1/broadcast_schedule?broadcast_id=eq.{broadcast_id}"
+    headers = {
+        "apikey": supabase_config['key'],
+        "Authorization": f"Bearer {supabase_config['key']}",
+        "Content-Type": "application/json"
+    }
+    data = {"actual_rating": actual_rating}
+    response = requests.patch(url, json=data, headers=headers)
+    return response.status_code == 204
+
+def update_broadcast_sales(broadcast_id: str, actual_sales: int):
+    url = f"{supabase_config['url']}/rest/v1/broadcast_schedule?broadcast_id=eq.{broadcast_id}"
+    headers = {
+        "apikey": supabase_config['key'],
+        "Authorization": f"Bearer {supabase_config['key']}",
+        "Content-Type": "application/json"
+    }
+    data = {"actual_sales": actual_sales}
+    response = requests.patch(url, json=data, headers=headers)
+    return response.status_code == 204
+
+def update_customer_purchase(customer_id: str, total_purchase: int):
+    url = f"{supabase_config['url']}/rest/v1/customer?customer_id=eq.{customer_id}"
+    headers = {
+        "apikey": supabase_config['key'],
+        "Authorization": f"Bearer {supabase_config['key']}",
+        "Content-Type": "application/json"
+    }
+    data = {"total_purchase": total_purchase}
+    response = requests.patch(url, json=data, headers=headers)
+    return response.status_code == 204
+
+# 데이터 로드
+df_broadcast = load_broadcast_data()
+df_customer = load_customer_data()
+
 # 제목
 st.title("📺 방송 성과 & 👥 고객 분석 통합 대시보드")
 st.markdown("---")
-
-# CSV 파일 읽기
-df_broadcast = pd.read_csv("broadcast_schedule.csv")
-df_customer = pd.read_csv("customer.csv")
 
 # 데이터 처리 - 방송 데이터
 df_broadcast['방송날짜'] = pd.to_datetime(df_broadcast['방송날짜'])
@@ -347,3 +465,88 @@ with tab6:
 
 st.markdown("---")
 st.info("💡 팁: 사이드바에서 조건을 선택하여 데이터를 필터링할 수 있습니다.")
+
+# ============================================================================
+# 데이터 수정 섹션
+# ============================================================================
+st.markdown("---")
+st.subheader("✏️ 데이터 수정 (테스트용)")
+
+edit_tab1, edit_tab2 = st.tabs(["📺 방송 데이터 수정", "👥 고객 데이터 수정"])
+
+with edit_tab1:
+    st.write("**방송 데이터를 수정하면 Supabase에 즉시 반영됩니다.**")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.subheader("시청률 수정")
+        selected_broadcast_rating = st.selectbox(
+            "수정할 방송 선택 (시청률):",
+            df_broadcast['방송ID'].values,
+            key="rating_select"
+        )
+        broadcast_row = df_broadcast[df_broadcast['방송ID'] == selected_broadcast_rating].iloc[0]
+        new_rating = st.number_input(
+            f"새로운 시청률 ({broadcast_row['방송ID']} - 현재: {broadcast_row['실제시청률']}%):",
+            min_value=0.0,
+            max_value=100.0,
+            value=float(broadcast_row['실제시청률']),
+            step=0.1,
+            key="rating_input"
+        )
+
+        if st.button("시청률 수정 저장", key="rating_btn"):
+            if update_broadcast_rating(selected_broadcast_rating, new_rating):
+                st.success(f"✅ {selected_broadcast_rating} 시청률을 {new_rating}%로 수정했습니다!")
+                st.cache_data.clear()
+            else:
+                st.error(f"❌ 수정 실패했습니다.")
+
+    with col2:
+        st.subheader("판매액 수정")
+        selected_broadcast_sales = st.selectbox(
+            "수정할 방송 선택 (판매액):",
+            df_broadcast['방송ID'].values,
+            key="sales_select"
+        )
+        broadcast_row = df_broadcast[df_broadcast['방송ID'] == selected_broadcast_sales].iloc[0]
+        new_sales = st.number_input(
+            f"새로운 판매액 ({broadcast_row['방송ID']} - 현재: ₩{broadcast_row['실제판매액']:,}):",
+            min_value=0,
+            value=int(broadcast_row['실제판매액']),
+            step=100000,
+            key="sales_input"
+        )
+
+        if st.button("판매액 수정 저장", key="sales_btn"):
+            if update_broadcast_sales(selected_broadcast_sales, new_sales):
+                st.success(f"✅ {selected_broadcast_sales} 판매액을 ₩{new_sales:,}로 수정했습니다!")
+                st.cache_data.clear()
+            else:
+                st.error(f"❌ 수정 실패했습니다.")
+
+with edit_tab2:
+    st.write("**고객 데이터를 수정하면 Supabase에 즉시 반영됩니다.**")
+
+    selected_customer = st.selectbox(
+        "수정할 고객 선택:",
+        df_customer['고객ID'].values,
+        key="customer_select"
+    )
+    customer_row = df_customer[df_customer['고객ID'] == selected_customer].iloc[0]
+
+    new_purchase = st.number_input(
+        f"새로운 구매액 ({customer_row['고객ID']} {customer_row['고객명']} - 현재: ₩{customer_row['총구매액']:,}):",
+        min_value=0,
+        value=int(customer_row['총구매액']),
+        step=100000,
+        key="purchase_input"
+    )
+
+    if st.button("구매액 수정 저장", key="purchase_btn"):
+        if update_customer_purchase(selected_customer, new_purchase):
+            st.success(f"✅ {selected_customer} {customer_row['고객명']}의 구매액을 ₩{new_purchase:,}로 수정했습니다!")
+            st.cache_data.clear()
+        else:
+            st.error(f"❌ 수정 실패했습니다.")
