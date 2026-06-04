@@ -11,14 +11,19 @@ st.set_page_config(page_title="방송/고객 통합 대시보드", layout="wide"
 # Supabase REST API 클라이언트
 @st.cache_resource
 def init_supabase():
-    url = st.secrets.get("supabase_url")
-    key = st.secrets.get("supabase_key")
+    try:
+        url = st.secrets.get("supabase_url")
+        key = st.secrets.get("supabase_key")
 
-    if not url or not key:
-        st.error("⚠️ Supabase 자격증명이 필요합니다. .streamlit/secrets.toml 파일을 확인하세요.")
+        if not url or not key:
+            st.error("⚠️ Supabase 자격증명이 필요합니다.")
+            st.info("Settings > Secrets에서 다음을 설정하세요:\n- supabase_url\n- supabase_key")
+            st.stop()
+
+        return {"url": url, "key": key}
+    except Exception as e:
+        st.error(f"❌ Supabase 초기화 오류: {str(e)}")
         st.stop()
-
-    return {"url": url, "key": key}
 
 supabase_config = init_supabase()
 
@@ -128,14 +133,17 @@ def update_customer_purchase(customer_id: str, total_purchase: int):
 st.title("📺 방송 성과 & 👥 고객 분석 통합 대시보드")
 st.markdown("---")
 
-# 데이터 로드
+# 데이터 로드 (에러 발생해도 앱은 계속 실행)
 try:
     df_broadcast = load_broadcast_data()
     df_customer = load_customer_data()
 
-    # 데이터가 비어있으면 경고
-    if df_broadcast.empty or df_customer.empty:
-        st.warning("⚠️ 데이터를 불러올 수 없습니다. Supabase 연결을 확인하세요.")
+    # 데이터가 비어있으면 경고하고 계속
+    data_loaded = not (df_broadcast.empty or df_customer.empty)
+
+    if not data_loaded:
+        st.warning("⚠️ 데이터를 불러올 수 없습니다.")
+        st.info("확인사항:\n1. Streamlit Cloud Secrets 설정 확인\n2. Supabase URL과 API 키 확인\n3. 인터넷 연결 확인")
         st.stop()
 
     # 데이터 처리 - 방송 데이터
@@ -148,7 +156,8 @@ try:
     df_customer['연령대'] = df_customer['연령대'].replace('35세', '30대')
 
 except Exception as e:
-    st.error(f"❌ 오류가 발생했습니다: {str(e)}")
+    st.error(f"❌ 데이터 로드 오류: {str(e)}")
+    st.error(f"오류 타입: {type(e).__name__}")
     st.stop()
 
 # 판매 데이터 (0 제외)
